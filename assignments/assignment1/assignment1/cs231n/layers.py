@@ -119,8 +119,9 @@ def relu_backward(dout, cache):
     return dx
     # 我现在写代码的情况就是，有思路，遇到技术细节就问DeepSeek
 
-
-def batchnorm_forward(x, gamma, beta, bn_param):
+#对gamma和beta等批量归一化的参数进行前向和反向传播
+#从在公式中的地位上来看，gamma相当于W，beta相当于b
+def batchnorm_forward(x, gamma, beta, bn_param): 
     """
     Forward pass for batch normalization.
 
@@ -189,7 +190,20 @@ def batchnorm_forward(x, gamma, beta, bn_param):
         # Referencing the original paper (https://arxiv.org/abs/1502.03167)   #
         # might prove to be helpful.                                          #
         #######################################################################
-        pass
+
+        sample_mean = x.mean(axis=0)  # 对样本维度（N）求平均，形状为(D,)
+        sample_var = ((x - sample_mean)** 2).mean(axis=0)  # 未修正方差（除以N），形状为(D,)
+
+        x_hat = (x - sample_mean) / np.sqrt(sample_var + eps)
+  
+        out=gamma*x_hat+beta
+
+        cache = (x, sample_mean, sample_var, x_hat, gamma, beta, eps)
+
+        running_mean = momentum * running_mean + (1 - momentum) * sample_mean
+        running_var = momentum * running_var + (1 - momentum) * sample_var
+
+
         #######################################################################
         #                           END OF YOUR CODE                          #
         #######################################################################
@@ -200,7 +214,14 @@ def batchnorm_forward(x, gamma, beta, bn_param):
         # then scale and shift the normalized data using gamma and beta.      #
         # Store the result in the out variable.                               #
         #######################################################################
-        pass
+        x_hat = (x - running_mean) / np.sqrt(running_var + eps)
+        
+        # 缩放和偏移（与训练阶段一致的gamma和beta）
+        out = gamma * x_hat + beta
+        
+        # 测试阶段无需缓存反向传播变量（通常测试不计算梯度）
+        cache = None
+        
         #######################################################################
         #                          END OF YOUR CODE                           #
         #######################################################################
@@ -231,14 +252,48 @@ def batchnorm_backward(dout, cache):
     - dgamma: Gradient with respect to scale parameter gamma, of shape (D,)
     - dbeta: Gradient with respect to shift parameter beta, of shape (D,)
     """
+    
+    x, sample_mean, sample_var, x_hat, gamma, beta, eps = cache
     dx, dgamma, dbeta = None, None, None
+    N=dout.shape[0]
     ###########################################################################
     # TODO: Implement the backward pass for batch normalization. Store the    #
     # results in the dx, dgamma, and dbeta variables.                         #
     # Referencing the original paper (https://arxiv.org/abs/1502.03167)       #
     # might prove to be helpful.                                              #
     ###########################################################################
+    #和 affine里面的数学原理是一样的
+    #similar as dx    
+    # dx与dxhat之间也有一定的函数关系，所以无法直接求dx，先求dxhat再求dx即可
+    dxhat = dout * gamma  # 形状(N, D)
+    #similar as dw。# 不一样，dot后的求梯度是dot的，但是*的求梯度是sum的
+    dgamma = np.sum(x_hat * dout, axis=0) 
+    #similar as db
+    dbeta = np.sum(dout, axis=0)
 
+
+    sqrt_var = np.sqrt(sample_var + eps)  # 前向传播中的标准差
+    inv_sqrt_var = 1.0 / sqrt_var  # 1/标准差（复用前向传播的中间结果）
+
+    # 均值的梯度（dmu）：x_hat对均值的偏导 * dxhat 求和
+    dmu = np.sum(dxhat * (-inv_sqrt_var), axis=0)  # 形状(D,)
+
+    # 方差的梯度（dvar）：x_hat对方差的偏导 * dxhat 求和
+    # x_hat对方差的偏导 = -(x - sample_mean) / [2*(sample_var + eps)^(3/2)]
+    dvar = np.sum(dxhat * (-(x - sample_mean) / (2 * (sample_var + eps) **(3/2))), axis=0)  # 形状(D,)
+
+    # 计算x的梯度（综合直接影响和间接影响）
+    # 直接影响：x_hat对x的偏导 * dxhat
+    dx1 = dxhat * inv_sqrt_var  # 形状(N, D)
+
+    # 间接影响（来自均值）：均值对x的偏导 * dmu
+    dx2 = dmu / N  # 均值对每个x的偏导是1/N，广播为(N, D)
+
+    # 间接影响（来自方差）：方差对x的偏导 * dvar
+    dx3 = (dvar * 2 * (x - sample_mean)) / N  # 方差对x的偏导是2*(x - mean)/N，形状(N, D)
+
+    # 总梯度：直接影响 - 均值的间接影响 - 方差的间接影响
+    dx = dx1 - dx2 - dx3
     ###########################################################################
     #                             END OF YOUR CODE                            #
     ###########################################################################
@@ -387,7 +442,9 @@ def dropout_forward(x, dropout_param):
         # TODO: Implement training phase forward pass for inverted dropout.   #
         # Store the dropout mask in the mask variable.                        #
         #######################################################################
-        pass
+        mask = (np.random.rand(*x.shape) < p).astype(x.dtype)
+        # Inverted Dropout：保留的神经元输出除以p（补偿测试时不缩放）
+        out = x * mask / p
         #######################################################################
         #                           END OF YOUR CODE                          #
         #######################################################################
@@ -395,7 +452,7 @@ def dropout_forward(x, dropout_param):
         #######################################################################
         # TODO: Implement the test phase forward pass for inverted dropout.   #
         #######################################################################
-        pass
+        out=x
         #######################################################################
         #                            END OF YOUR CODE                         #
         #######################################################################
@@ -422,7 +479,7 @@ def dropout_backward(dout, cache):
         #######################################################################
         # TODO: Implement training phase backward pass for inverted dropout   #
         #######################################################################
-        pass
+        dx = dout * mask / dropout_param["p"]
         #######################################################################
         #                          END OF YOUR CODE                           #
         #######################################################################

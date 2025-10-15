@@ -5,6 +5,8 @@ import numpy as np
 
 from ..layers import *
 from ..layer_utils import *
+from cs231n import layers  
+
 
 
 class TwoLayerNet(object):
@@ -256,6 +258,10 @@ class FullyConnectedNet(object):
         self.dtype = dtype
         self.params = {}
 
+        layers_dims=[input_dim]+hidden_dims+[num_classes]
+
+
+
         ############################################################################
         # TODO: Initialize the parameters of the network, storing all values in    #
         # the self.params dictionary. Store weights and biases for the first layer #
@@ -268,6 +274,18 @@ class FullyConnectedNet(object):
         # beta2, etc. Scale parameters should be initialized to ones and shift     #
         # parameters should be initialized to zeros.                               #
         ############################################################################
+
+        for i in range(1, self.num_layers+1):
+          self.params[f"W{i}"]=np.random.normal(loc=0,scale=weight_scale,size=(layers_dims[i-1], layers_dims[i])).astype(self.dtype)
+          self.params[f'b{i}'] = np.zeros(layers_dims[i], dtype=self.dtype)
+
+          if self.normalization == "batchnorm" and i <= self.num_layers - 1:  # 明白归一化怎么处理的，但是不知道函数怎么写
+                # 缩放参数gamma初始化为1
+                self.params[f'gamma{i}'] = np.ones(layers_dims[i], dtype=self.dtype)
+                # 偏移参数beta初始化为0
+                self.params[f'beta{i}'] = np.zeros(layers_dims[i], dtype=self.dtype)
+
+
 
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -338,7 +356,37 @@ class FullyConnectedNet(object):
         # self.bn_params[1] to the forward pass for the second batch normalization #
         # layer, etc.                                                              #
         ############################################################################
+        cache = {}  # 键：层标识（如'affine1'），值：该层的中间变量
+        N = X.shape[0]  # 样本数量
 
+        # 输入数据展平（适应全连接层，形状从(N, d1, d2, ...)变为(N, D)）
+        out = X.reshape(N, -1)
+
+        # 前(L-1)层：affine -> [batchnorm] -> relu -> [dropout]
+        for i in range(1, self.num_layers):  # i=1到L-1（L为总层数）
+            # 1. 仿射层（affine: y = Wx + b）
+            W = self.params[f'W{i}']
+            b = self.params[f'b{i}']
+            out, cache[f'affine{i}'] = layers.affine_forward(out, W, b)  # 调用仿射层前向函数
+
+            # 2. 批量归一化（若启用）
+            if self.normalization == "batchnorm":
+                gamma = self.params[f'gamma{i}']
+                beta = self.params[f'beta{i}']
+                bn_param = self.bn_params[i-1]  # 第i层对应第i-1个bn参数
+                out, cache[f'bn{i}'] = layers.batchnorm_forward(out, gamma, beta, bn_param)  # 调用BN前向函数
+
+            # 3. ReLU激活函数
+            out, cache[f'relu{i}'] = layers.relu_forward(out)  # 调用ReLU前向函数
+
+            # 4. Dropout（若启用）
+            if self.use_dropout:
+                out, cache[f'dropout{i}'] = layers.dropout_forward(out, self.dropout_param)  # 调用dropout前向函数
+
+        # 最后一层（第L层）：仅仿射层（无激活/归一化，直接输出scores）
+        W_final = self.params[f'W{self.num_layers}']
+        b_final = self.params[f'b{self.num_layers}']
+        scores, cache[f'affine{self.num_layers}'] = layers.affine_forward(out, W_final, b_final)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -348,6 +396,45 @@ class FullyConnectedNet(object):
             return scores
 
         loss, grads = 0.0, {}
+
+
+        # 1. 计算softmax数据损失和输出层梯度（dscores）
+        data_loss, dscores = layers.softmax_loss(scores, y)  # 调用softmax损失函数
+
+        # 2. 计算L2正则化损失（仅对权重W，不含偏置和BN的gamma/beta）
+        reg_loss = 0.0
+        for i in range(1, self.num_layers + 1):
+            W = self.params[f'W{i}']
+            reg_loss += 0.5 * self.reg * np.sum(W **2)  # 含0.5因子，简化梯度计算
+        loss = data_loss + reg_loss  # 总损失 = 数据损失 + 正则化损失
+
+        # 3. 反向传播：从输出层向输入层回传梯度
+
+        # 3.1 最后一层（第L层）仿射层的反向传播
+        i = self.num_layers
+        dx, dW, db = layers.affine_backward(dscores, cache[f'affine{i}'])  # 调用仿射层反向函数
+        grads[f'W{i}'] = dW + self.reg * self.params[f'W{i}']  # 加上正则化梯度
+        grads[f'b{i}'] = db
+
+        # 3.2 前(L-1)层的反向传播（从L-1层到1层）
+        for i in reversed(range(1, self.num_layers)):  # 逆序遍历：L-1 → 1
+            # a. Dropout反向（若启用）
+            if self.use_dropout:
+                dx = layers.dropout_backward(dx, cache[f'dropout{i}'])  # 调用dropout反向函数
+
+            # b. ReLU反向
+            dx = layers.relu_backward(dx, cache[f'relu{i}'])  # 调用ReLU反向函数
+
+            # c. 批量归一化反向（若启用）
+            if self.normalization == "batchnorm":
+                dx, dgamma, dbeta = layers.batchnorm_backward(dx, cache[f'bn{i}'])  # 调用BN反向函数
+                grads[f'gamma{i}'] = dgamma
+                grads[f'beta{i}'] = dbeta
+
+            # d. 仿射层反向
+            dx, dW, db = layers.affine_backward(dx, cache[f'affine{i}'])  # 调用仿射层反向函数
+            grads[f'W{i}'] = dW + self.reg * self.params[f'W{i}']  # 加上正则化梯度
+            grads[f'b{i}'] = db
         ############################################################################
         # TODO: Implement the backward pass for the fully connected net. Store the #
         # loss in the loss variable and gradients in the grads dictionary. Compute #
