@@ -138,7 +138,15 @@ class CaptioningRNN:
         #                                                                          #
         # You also don't have to implement the backward pass.                      #
         ############################################################################
-        # 
+        h0=torch.matmul(features,W_proj)+b_proj
+        embeddings=W_embed[captions_in]
+        if self.cell_type=='rnn':
+            hidden_states=rnn_forward(embeddings,h0,Wx,Wh,b)
+
+        scores = temporal_affine_forward(hidden_states, W_vocab, b_vocab)
+        
+        
+        loss=temporal_softmax_loss(scores,captions_out,mask)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -202,7 +210,44 @@ class CaptioningRNN:
         # NOTE: we are still working over minibatches in this function. Also if   #
         # you are using an LSTM, initialize the first cell state to zeros.        #
         ###########################################################################
-        # 
+        # 步骤 0 (初始化):
+        # (你已经做对了) 计算初始隐藏状态 h，形状 (N, H)
+        h = features @ W_proj + b_proj
+        
+        # (你没有做) 准备第一个输入词：<START> 标记
+        # 我们需要为批量中的 N 个样本都准备一个 <START> 标记
+        # current_word_idx 形状为 (N,)
+        current_word_idx = self._start * torch.ones(N, dtype=torch.long)
+
+        # 步骤 1 (开始循环):
+        # 循环 max_length 次，一次生成一个词
+        for t in range(max_length):
+        
+            # TODO (1): 嵌入上一个单词
+            # 把 (N,) 的索引 转换为 (N, W) 的词向量
+            word_vector = W_embed[current_word_idx]
+
+            # TODO (2): 执行一个 RNN 步骤
+            # 使用 rnn_step_forward (不是 rnn_forward)
+            # 输入 (N, W) 和 (N, H)，输出新的 (N, H)
+            h = rnn_step_forward(word_vector, h, Wx, Wh, b)
+
+            # TODO (3): 计算分数
+            # 使用普通的仿射变换 (不是 temporal_affine_forward)
+            # 把 (N, H) 的隐藏状态 转换为 (N, V) 的分数
+            scores = h @ W_vocab + b_vocab
+
+            # TODO (4): 选择分数最高的词
+            # 沿着 V (dim=1) 维度找到最大值的索引
+            # current_word_idx 形状为 (N,)
+            current_word_idx = torch.argmax(scores, dim=1)
+
+            # (你没有做) 把这个新生成的词（索引）存入结果数组
+            captions[:, t] = current_word_idx
+            
+            # 循环自动进入下一步...
+            # 下一次循环的 `word_vector = W_embed[current_word_idx]` 
+            # 将使用我们刚刚在 TODO (4) 中生成的词
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################

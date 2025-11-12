@@ -1,0 +1,14 @@
+# macOS specific files
+.DS_Store
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Large data, models, and media files (THE IMPORTANT PART!)
+*.h5
+*.npz
+*.pth
+*.pt
+*.mp4
+*.gif

@@ -43,7 +43,7 @@ def rnn_step_forward(x, prev_h, Wx, Wh, b):
     ##############################################################################
     # TODO: Implement a single forward step for the vanilla RNN.                 #
     ##############################################################################
-    # 
+    next_h=torch.tanh(x@Wx+prev_h@Wh+b)
     ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
@@ -68,12 +68,21 @@ def rnn_forward(x, h0, Wx, Wh, b):
     - h: Hidden states for the entire timeseries, of shape (N, T, H)
     """
     h = None
+    T=x.shape[1]
+    first_h=h0
+    next_h = None
+    h=[] 
     ##############################################################################
     # TODO: Implement forward pass for a vanilla RNN running on a sequence of    #
     # input data. You should use the rnn_step_forward function that you defined  #
     # above. You can use a for loop to help compute the forward pass.            #
     ##############################################################################
-    # 
+    for i in range(T):
+        next_h=rnn_step_forward(x[:,i,:],first_h,Wx,Wh,b)
+        h.append(next_h)
+        first_h=next_h
+
+    h = torch.stack(h, dim=1)
     ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
@@ -101,7 +110,7 @@ def word_embedding_forward(x, W):
     #                                                                            #
     # HINT: This can be done in one line using Pytorch's array indexing.         #
     ##############################################################################
-    # 
+    out = W[x]
     ##############################################################################
     #                               END OF YOUR CODE                             #
     ##############################################################################
